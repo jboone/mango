@@ -50,7 +50,7 @@ class SessionStore(SessionBase):
             'expire_date': self.get_expiry_date()
             }
         res = db.sessions.update(
-                {'session_key': self.session_key},
+                {'session_key': obj['session_key']},
                 {'$set': obj},
                 upsert=True,
                 safe=True,
