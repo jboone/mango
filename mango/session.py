@@ -1,7 +1,7 @@
-import datetime
 from django.contrib.sessions.backends.base import SessionBase, CreateError
 from django.utils.encoding import force_unicode
 from mango import database as db, OperationFailure
+from django.utils import timezone
 
 class SessionStore(SessionBase):
     """
@@ -10,7 +10,7 @@ class SessionStore(SessionBase):
     def load(self):
         s = db.sessions.find_one( { 
                 'session_key': self.session_key, 
-                'expire_date': {'$gt': datetime.datetime.now()}})
+                'expire_date': {'$gt': timezone.now()}})
         if s:
             return self.decode(force_unicode(s['session_data']))
         else:
