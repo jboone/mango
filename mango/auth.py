@@ -1,7 +1,7 @@
 from mango import Model, database as db
 from django.utils.encoding import smart_str
 from django.contrib import auth
-from django.contrib.auth.models import UNUSABLE_PASSWORD, get_hexdigest, check_password
+from django.contrib.auth.models import make_password, check_password, is_password_usable
 import datetime
 import urllib
 
@@ -15,42 +15,60 @@ class User(Model):
         return "/users/%s/" % urllib.quote(smart_str(self.username))
 
     def is_anonymous(self):
+        """
+        Always returns False. This is a way of comparing User objects to
+        anonymous users.
+        """
         return False
 
     def is_authenticated(self):
+        """
+        Always return True. This is a way to tell if the user has been
+        authenticated in templates.
+        """
         return True
 
     def get_full_name(self):
+        """
+        Returns the first_name plus the last_name, with a space in between.
+        """
         full_name = u'%s %s' % (self.first_name, self.last_name)
         return full_name.strip()
 
     def set_password(self, raw_password):
-        import random
-        algo = 'sha1'
-        salt = get_hexdigest(algo, str(random.random()), str(random.random()))[:5]
-        hsh = get_hexdigest(algo, salt, raw_password)
-        self.password = '%s$%s$%s' % (algo, salt, hsh)
+        self.password = make_password(raw_password)
 
     def check_password(self, raw_password):
-        if '$' not in self.password:
-            is_correct = (self.password == get_hexdigest('md5', '', raw_password))
-            if is_correct:
-                self.set_password(raw_password)
-                self.save()
-            return is_correct
-        return check_password(raw_password, self.password)
+        """
+        Returns a boolean of whether the raw_password was correct. Handles
+        hashing formats behind the scenes.
+        """
+        def setter(raw_password):
+            self.set_password(raw_password)
+            self.save()
+        return check_password(raw_password, self.password, setter)
 
     def set_unusable_password(self):
-        self.password = UNUSABLE_PASSWORD
+        # Sets a value that will never be a valid hash
+        self.password = make_password(None)
 
     def has_usable_password(self):
-        return self.password != UNUSABLE_PASSWORD
+        return is_password_usable(self.password)
 
-    def get_group_permissions(self):
+    def get_group_permissions(self, obj=None):
+        """
+        Returns a list of permission strings that this user has through his/her
+        groups. This method queries all available auth backends. If an object
+        is passed in, only permissions matching this object are returned.
+        """
         permissions = set()
         for backend in auth.get_backends():
             if hasattr(backend, "get_group_permissions"):
-                permissions.update(backend.get_group_permissions(self))
+                if obj is not None:
+                    permissions.update(backend.get_group_permissions(self,
+                                                                     obj))
+                else:
+                    permissions.update(backend.get_group_permissions(self))
         return permissions
 
     def get_all_permissions(self):
@@ -60,43 +78,48 @@ class User(Model):
                 permissions.update(backend.get_all_permissions(self))
         return permissions
 
-    def has_perm(self, perm):
-        if not self.is_active:
-            return False
+    def has_perm(self, perm, obj=None):
+        """
+        Returns True if the user has the specified permission. This method
+        queries all available auth backends, but returns immediately if any
+        backend returns True. Thus, a user who has permission from a single
+        auth backend is assumed to have permission in general. If an object is
+        provided, permissions for this specific object are checked.
+        """
 
-        if self.is_superuser:
+        # Active superusers have all permissions.
+        if self.is_active and self.is_superuser:
             return True
 
-        for backend in auth.get_backends():
-            if hasattr(backend, "has_perm"):
-                if backend.has_perm(self, perm):
-                    return True
-        return False
+        # Otherwise we need to check the backends.
+        return _user_has_perm(self, perm, obj)
 
-    def has_perms(self, perm_list):
+    def has_perms(self, perm_list, obj=None):
+        """
+        Returns True if the user has each of the specified permissions. If
+        object is passed, it checks if the user has all required perms for this
+        object.
+        """
         for perm in perm_list:
-            if not self.has_perm(perm):
+            if not self.has_perm(perm, obj):
                 return False
         return True
 
     def has_module_perms(self, app_label):
-        if not self.is_active:
-            return False
-
-        if self.is_superuser:
+        """
+        Returns True if the user has any permissions in the given app label.
+        Uses pretty much the same logic as has_perm, above.
+        """
+        # Active superusers have all permissions.
+        if self.is_active and self.is_superuser:
             return True
 
-        for backend in auth.get_backends():
-            if hasattr(backend, "has_module_perms"):
-                if backend.has_module_perms(self, app_label):
-                    return True
-        return False
-
-    def get_and_delete_messages(self):
-        return []
+        return _user_has_module_perms(self, app_label)
 
     def email_user(self, subject, message, from_email=None):
-        from django.core.mail import send_mail
+        """
+        Sends an email to this User.
+        """
         send_mail(subject, message, from_email, [self.email])
 
     def get_profile(self):
