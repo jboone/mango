@@ -25,7 +25,7 @@ class SessionStore(SessionBase):
 
     def create(self):
         while True:
-            self.session_key = self._get_new_session_key()
+            self._session_key = self._get_new_session_key()
             try:
                 # Save immediately to ensure we have a unique entry in the
                 # database.
@@ -45,7 +45,7 @@ class SessionStore(SessionBase):
         entry).
         """
         obj = {
-            'session_key': self.session_key,
+            'session_key': self._get_or_create_session_key(),
             'session_data': self.encode(self._get_session(no_load=must_create)),
             'expire_date': self.get_expiry_date()
             }
@@ -60,7 +60,7 @@ class SessionStore(SessionBase):
 
     def delete(self, session_key=None):
         if session_key is None:
-            if self._session_key is None:
+            if self.session_key is None:
                 return
-            session_key = self._session_key
+            session_key = self.session_key
         db.sessions.remove({'session_key': session_key})
